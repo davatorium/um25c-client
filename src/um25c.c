@@ -323,6 +323,8 @@ int main ( int argc, char **argv )
         convert ( &umc );
         /** Print the result. */
         print ( print_format, &umc, &now );
+        /** Flush the output. */
+        fflush(stdout);
 
         /** Time calculations. */
         double s = trunc(interval);
