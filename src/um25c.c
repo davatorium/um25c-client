@@ -429,7 +429,7 @@ int main ( int argc, char **argv )
             /** If there is data to read, read it. */
             if ( FD_ISSET(fp, &rfds) )
             {
-                ssize_t r = read( fp, &(umc.raw[index]), 130);
+                ssize_t r = read( fp, &(umc.raw[index]), 130-index);
                 if (r < 0 ) {
                     fprintf(stderr, "Failed top read from serial port: %s\n", strerror(errno) );
                     break;
