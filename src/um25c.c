@@ -56,6 +56,11 @@
 #include <math.h>
 
 
+const uint8_t msg_data_dump = 0xf0;
+const uint8_t msg_clear_sum = 0xf4;
+const uint8_t data_dump_length = 130;
+
+
 // Quit on signal.
 static int quit =  0;
 
@@ -99,7 +104,7 @@ struct _UMC
     uint16_t charge_mode;
     // 102
     uint32_t milliamps_threshold;
-    // 106
+      // 106
     uint32_t milliwatts_threshold;
     // 110
     uint16_t current_threshold_centivolt;
@@ -197,6 +202,12 @@ static void print ( const char * const print_format, const UMC * const umc, cons
                    now->tv_sec,
                    now->tv_nsec/1000000L);
             p+= strlen("Time");
+        } else if ( strncmp ( p, "SumWatt", strlen("SumWatt")) == 0 ) {
+            printf("%.03f", umc->mes[umc->current_datagroup].milliwatts/1000.0);
+            p += strlen("SumWatt");
+        } else if ( strncmp ( p, "SumAmp", strlen("SumAmp")) == 0 ) {
+            printf("%.03f", umc->mes[umc->current_datagroup].milliamps/1000.0);
+            p += strlen("SumAmp");
         } else {
             putchar(*p);
             p++;
@@ -204,6 +215,26 @@ static void print ( const char * const print_format, const UMC * const umc, cons
 
     }
     printf("\n");
+}
+
+
+static int um25c_write ( int fd, uint8_t msg )
+{
+    fd_set wfds;
+    FD_ZERO(&wfds);
+    FD_SET(fd, &wfds);
+    int retv = select ( fd+1, NULL, &wfds, NULL, NULL );
+    if ( retv == -1 ) {
+        fprintf(stderr, "Failed to read from serial port: %s\n", strerror(errno));
+        return 1;
+    }
+
+    if ( FD_ISSET(fd, &wfds) ) {
+        write(fd, &msg, 1);
+        return 0;
+    }
+
+    return 1;
 }
 
 
@@ -236,6 +267,7 @@ int main ( int argc, char **argv )
      */
     static const struct option long_options[] = {
         {"help",     no_argument,       NULL, 'h'},
+        {"clear",    no_argument,       NULL, 'c'},
         {"format",   required_argument, 0,    'f'},
         {"device",   required_argument, 0,    'd'},
         {"interval", required_argument, 0,    'i'},
@@ -245,6 +277,7 @@ int main ( int argc, char **argv )
     char *serial_port     = "/dev/rfcomm0";
     char *print_format    = "Volt, Amp";
     double interval = 1.0f;
+    int  clear_sum        = 0;
 
 
     /**
@@ -252,7 +285,7 @@ int main ( int argc, char **argv )
      */
     while ( 1 ) {
         int option_index = 0;
-        int c = getopt_long ( argc, argv, "d:f:i:h", long_options, &option_index);
+        int c = getopt_long ( argc, argv, "d:f:i:hc", long_options, &option_index);
         if ( c == -1 ) {
             // Parsing done.
             break;
@@ -263,12 +296,15 @@ int main ( int argc, char **argv )
                 printf(" -f, --format:    Adjust the output format.\n");
                 printf(" -d, --device:    Set the serial device.\n");
                 printf(" -i, --interval:  Set the sampling interval.\n");
+                printf(" -c, --clear:     Clear the sum value\n");
                 printf("\n");
                 printf("Format supports the following options:\n");
                 printf(" * Time  - Unix timestamp\n");
                 printf(" * Volt  - Current voltage\n");
                 printf(" * Amp   - Current amperage\n");
                 printf(" * Watt  - Current Wattage\n");
+                printf(" * SumWatt - Current data group total Wattage (Wh)\n");
+                printf(" * SumAmp - Current data group total Amperage (Ah)\n");
                 printf(" * Temp  - Temperature (in Celsius)\n");
                 printf("\n");
                 printf("In session, press ctrl-c to quit.\n");
@@ -284,6 +320,9 @@ int main ( int argc, char **argv )
             case 'i':
                 interval = strtod(optarg, NULL);
                 fprintf(stderr, "Set interval: %0.1f\n", interval);
+                break;
+            case 'c':
+                clear_sum = 1;
                 break;
             default:
                 fprintf(stderr, "Invalid option passed.\n");
@@ -325,6 +364,16 @@ int main ( int argc, char **argv )
     fprintf(stderr, "Starting...\n");
 
 
+    if ( clear_sum ) {
+        fprintf(stderr, "Clear sum\n" );
+        if ( um25c_write ( fp, msg_clear_sum ) ) {
+            fprintf(stderr, "Failed to clear sum: %s\n", strerror ( errno )  );
+            quit = 1;
+        }
+        // This sleep is required otherwise first data dump will fail.
+        usleep(200000);
+    }
+
     // Get initial timestamp.
     struct timespec start,now;
     int clk_retv = clock_gettime ( CLOCK_MONOTONIC, &start);
@@ -334,22 +383,43 @@ int main ( int argc, char **argv )
     }
     while ( !quit )
     {
-        const char msg = 0xF0;
-        write(fp, &msg, 1);
         UMC_READ umc;
+        /**
+         * Request a data dump.
+         */
+        if ( um25c_write ( fp, msg_data_dump ) ) {
+            quit = 1;
+            continue;
+        }
+        /**
+         * Read response
+         */
         ssize_t index = 0;
-        while ( index < 130 )
+        while ( index < data_dump_length )
         {
-            ssize_t r = read( fp, &(umc.raw[index]), 130);
-            if (r < 0 ) {
-                fprintf(stderr, "Failed top read from serial port: %s\n", strerror(errno) );
+            fd_set rfds;
+            FD_ZERO(&rfds);
+            FD_SET(fp, &rfds);
+            int retv = select ( fp+1, &rfds, NULL, NULL, NULL );
+            if ( retv == -1 ) {
+                fprintf(stderr, "Failed to read from serial port: %s\n", strerror(errno));
                 break;
             }
-            index += r;
-            if(quit){
-                continue;
+            /** If there is data to read, read it. */
+            if ( FD_ISSET(fp, &rfds) )
+            {
+                ssize_t r = read( fp, &(umc.raw[index]), 130);
+                if (r < 0 ) {
+                    fprintf(stderr, "Failed top read from serial port: %s\n", strerror(errno) );
+                    break;
+                }
+                index += r;
+            }
+            if(quit) {
+                break;
             }
         }
+
 
         int clk_retv = clock_gettime ( CLOCK_MONOTONIC, &now);
         if ( clk_retv < 0 ) {

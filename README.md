@@ -31,10 +31,12 @@ It comes with a android and windows application for logging.
 
 This tool is can be used to log the following samples:
 
-* Amperage
-* Voltage
-* Wattage
-* Temperature.
+* Amperage (A)
+* Voltage (V)
+* Wattage (W)
+* Temperature (C).
+* Data group Summed Amp (Ah)
+* Data group Summed Watt (Wh)
 
 (more to be added in future)
 
