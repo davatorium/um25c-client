@@ -27,6 +27,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -56,8 +57,9 @@
 #include <math.h>
 
 
-const uint8_t msg_data_dump = 0xf0;
-const uint8_t msg_clear_sum = 0xf4;
+const uint8_t msg_data_dump    = 0xf0;
+const uint8_t msg_clear_sum    = 0xf4;
+const uint8_t msg_data_group   = 0xa0;
 const uint8_t data_dump_length = 130;
 
 
@@ -271,13 +273,15 @@ int main ( int argc, char **argv )
         {"format",   required_argument, 0,    'f'},
         {"device",   required_argument, 0,    'd'},
         {"interval", required_argument, 0,    'i'},
+        {"group",    required_argument, 0,    'g'},
         {0, 0, 0, 0}
     };
     /** Defaults */
-    char *serial_port     = "/dev/rfcomm0";
-    char *print_format    = "Volt, Amp";
-    double interval = 1.0f;
-    int  clear_sum        = 0;
+    char    *serial_port  = "/dev/rfcomm0";
+    char    *print_format = "Volt, Amp";
+    double   interval     = 1.0f;
+    int      clear_sum    = 0;
+    int      data_group   = -1;
 
 
     /**
@@ -285,7 +289,7 @@ int main ( int argc, char **argv )
      */
     while ( 1 ) {
         int option_index = 0;
-        int c = getopt_long ( argc, argv, "d:f:i:hc", long_options, &option_index);
+        int c = getopt_long ( argc, argv, "d:f:i:g:hc", long_options, &option_index);
         if ( c == -1 ) {
             // Parsing done.
             break;
@@ -296,7 +300,8 @@ int main ( int argc, char **argv )
                 printf(" -f, --format:    Adjust the output format.\n");
                 printf(" -d, --device:    Set the serial device.\n");
                 printf(" -i, --interval:  Set the sampling interval.\n");
-                printf(" -c, --clear:     Clear the sum value\n");
+                printf(" -c, --clear:     Clear the sum value.\n");
+                printf(" -g, --group:     Pick data group.\n");
                 printf("\n");
                 printf("Format supports the following options:\n");
                 printf(" * Time  - Unix timestamp\n");
@@ -323,6 +328,12 @@ int main ( int argc, char **argv )
                 break;
             case 'c':
                 clear_sum = 1;
+                break;
+            case 'g':
+                data_group = (int)strtoumax(optarg, NULL, 10);
+                if ( data_group > 9) {
+                    data_group = 9;
+                }
                 break;
             default:
                 fprintf(stderr, "Invalid option passed.\n");
@@ -363,6 +374,13 @@ int main ( int argc, char **argv )
     // Start reading.
     fprintf(stderr, "Starting...\n");
 
+    if ( data_group >= 0 ){
+        fprintf(stderr, "Set data group: %d\n", data_group );
+        if ( um25c_write ( fp, msg_data_group + (data_group)) ) {
+            fprintf(stderr, "Failed to set data group: %s\n", strerror ( errno )  );
+            quit = 1;
+        }
+    }
 
     if ( clear_sum ) {
         fprintf(stderr, "Clear sum\n" );
@@ -370,9 +388,9 @@ int main ( int argc, char **argv )
             fprintf(stderr, "Failed to clear sum: %s\n", strerror ( errno )  );
             quit = 1;
         }
-        // This sleep is required otherwise first data dump will fail.
-        usleep(200000);
     }
+    // This sleep is required otherwise first data dump will fail if we issued command.
+    usleep(200000);
 
     // Get initial timestamp.
     struct timespec start,now;
