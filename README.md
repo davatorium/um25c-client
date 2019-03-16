@@ -44,3 +44,5 @@ It outputs the samples to standard out.
 This tool does not handle the bluetooth connection, use bluetoothct/blueman for this. You connect to the
 `/dev/rfcomm0` device.
 
+You can also use this with an UM25 via a USB to serial cable.
+
