@@ -28,6 +28,13 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+/** termios */
+#include <termios.h>
 
 /** Error reporting */
 #include <errno.h>
@@ -115,6 +122,11 @@ struct _UMC
 } __attribute__((packed,aligned(1)));
 
 typedef struct _UMC UMC;
+
+typedef union {
+    uint8_t raw[130];
+    UMC umc;
+} UMC_READ;
 
 
 /**
@@ -217,7 +229,8 @@ static struct timespec  timespec_add ( const struct timespec a, const struct tim
  */
 int main ( int argc, char **argv )
 {
-    FILE *fp;
+    struct termios oldtio;
+    int fp;
     /**
      * Commandline arguments.
      */
@@ -285,13 +298,28 @@ int main ( int argc, char **argv )
 
     // Connect to serial port.
     fprintf(stderr, "Connecting...\n");
-    fp = fopen ( serial_port, "rw+" );
+    fp = open ( serial_port, O_RDWR|O_NOCTTY );
 
-    if ( fp == NULL )
+    if ( fp < 0 )
     {
         fprintf(stderr, "Failed top open serial port: %s\n", strerror(errno) );
         return EXIT_FAILURE;
     }
+
+    // save status port settings
+    tcgetattr ( fp, &oldtio );
+    // Setup the serial port.
+    struct termios newtio = { 0, };
+    newtio.c_cflag     = B9600| CS8 | CREAD | PARODD;
+    newtio.c_iflag     = 0;
+    newtio.c_oflag     = 0;
+    newtio.c_lflag     = 0;                   //ICANON;
+    newtio.c_cc[VMIN]  = 1;
+    newtio.c_cc[VTIME] = 0;
+    tcflush ( fp, TCIFLUSH | TCIOFLUSH );
+    tcsetattr ( fp, TCSANOW, &newtio );
+
+
 
     // Start reading.
     fprintf(stderr, "Starting...\n");
@@ -306,12 +334,21 @@ int main ( int argc, char **argv )
     }
     while ( !quit )
     {
-        fputc(0xf0, fp);
-        UMC umc;
-        ssize_t r = fread( &umc, 130,1, fp);
-        if (r < 0 ) {
-            fprintf(stderr, "Failed top read from serial port: %s\n", strerror(errno) );
-            break;
+        const char msg = 0xF0;
+        write(fp, &msg, 1);
+        UMC_READ umc;
+        ssize_t index = 0;
+        while ( index < 130 )
+        {
+            ssize_t r = read( fp, &(umc.raw[index]), 130);
+            if (r < 0 ) {
+                fprintf(stderr, "Failed top read from serial port: %s\n", strerror(errno) );
+                break;
+            }
+            index += r;
+            if(quit){
+                continue;
+            }
         }
 
         int clk_retv = clock_gettime ( CLOCK_MONOTONIC, &now);
@@ -320,9 +357,9 @@ int main ( int argc, char **argv )
             break;
         }
         /** Convert the format from Network (Big) Endian to Host Endian. */
-        convert ( &umc );
+        convert ( &(umc.umc) );
         /** Print the result. */
-        print ( print_format, &umc, &now );
+        print ( print_format, &(umc.umc), &now );
         /** Flush the output. */
         fflush(stdout);
 
@@ -343,6 +380,8 @@ int main ( int argc, char **argv )
 
     fprintf(stderr, "Quiting...");
     // Closing.
-    fclose(fp);
+    tcflush ( fp, TCIFLUSH );
+    tcsetattr ( fp, TCSANOW, &oldtio );
+    close(fp);
     return EXIT_SUCCESS;
 }
