@@ -52,3 +52,4 @@ You can also use this with an UM25 via a USB to serial cable.
 The logfile can then be parsed f.e. gnuplot:
 
 ![Charging Tablet](images/plot.png)
+![Dummy load 0-2.1 A](images/plot2.png)
