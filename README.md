@@ -48,3 +48,7 @@ This tool does not handle the bluetooth connection, use bluetoothct/blueman for 
 
 You can also use this with an UM25 via a USB to serial cable.
 
+
+The logfile can then be parsed f.e. gnuplot:
+
+![Charging Tablet](images/plot.png)

@@ -233,6 +233,7 @@ static int um25c_write ( int fd, uint8_t msg )
 
     if ( FD_ISSET(fd, &wfds) ) {
         write(fd, &msg, 1);
+        syncfs(fd);
         return 0;
     }
 
@@ -381,6 +382,8 @@ int main ( int argc, char **argv )
             quit = 1;
         }
     }
+    // This sleep is required otherwise first data dump will fail if we issued command.
+    usleep(200000);
 
     if ( clear_sum ) {
         fprintf(stderr, "Clear sum\n" );
